@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  fmt:
+    name: Terraform Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+  validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - modules/vpc
+          - modules/ecs-fargate
+          - modules/rds-postgres
+          - modules/s3-cloudfront
+          - modules/iam-roles
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+
+      - name: Init
+        run: terraform -chdir=${{ matrix.module }} init -backend=false
+
+      - name: Validate
+        run: terraform -chdir=${{ matrix.module }} validate
+
+  lint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: terraform-linters/setup-tflint@v4
+
+      - name: Init TFLint
+        run: tflint --init
+
+      - name: Lint all modules
+        run: |
+          for dir in modules/*/; do
+            echo "Linting $dir..."
+            tflint --chdir="$dir"
+          done
+
+  security:
+    name: Checkov Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: modules/
+          soft_fail: true
+          output_format: cli
+
+  docs:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install terraform-docs
+        run: |
+          curl -sSLo terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/v0.18.0/terraform-docs-v0.18.0-linux-amd64.tar.gz
+          tar -xzf terraform-docs.tar.gz
+          chmod +x terraform-docs
+          sudo mv terraform-docs /usr/local/bin/
+
+      - name: Verify docs are up to date
+        run: |
+          for dir in modules/*/; do
+            if [ -f "$dir/README.md" ]; then
+              terraform-docs markdown table "$dir" --output-check
+            fi
+          done
